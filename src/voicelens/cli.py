@@ -4,6 +4,7 @@ import typer
 from rich.console import Console
 
 from voicelens import __version__
+from voicelens.commands.analyze import analyze_command
 from voicelens.commands.doctor import perform_system_checks
 
 # Initialize Rich Console
@@ -49,6 +50,12 @@ def main_callback(
 def doctor() -> None:
     """Run a system check to diagnose environmental issues."""
     perform_system_checks()
+
+
+@app.command()
+def analyze() -> None:
+    """Record audio from the default microphone and save it as a WAV file."""
+    analyze_command()
 
 
 if __name__ == "__main__":
