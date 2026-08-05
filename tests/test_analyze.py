@@ -202,9 +202,18 @@ def test_audio_recorder_missing_sounddevice():
             recorder.start_recording()
 
 
-def test_cli_analyze_command_success(mock_sounddevice):
+@patch("voicelens.transcriber.whisper.WhisperModel")
+def test_cli_analyze_command_success(mock_whisper, mock_sounddevice):
     """Verify that 'voicelens analyze' completes happily with mocked user inputs."""
     assert mock_sounddevice is not None
+
+    # Setup mock WhisperModel instance
+    mock_model = MagicMock()
+    mock_whisper.return_value = mock_model
+    mock_segment = MagicMock()
+    mock_segment.text = "This is a mock speech transcript."
+    mock_model.transcribe.return_value = ([mock_segment], MagicMock())
+
     runner = CliRunner()
     # Simulate user pressing ENTER twice: once to start, once to stop
     result = runner.invoke(app, ["analyze"], input="\n\n")
@@ -213,6 +222,8 @@ def test_cli_analyze_command_success(mock_sounddevice):
     assert "VoiceLens Audio Recorder" in result.output
     assert "Recording stopped successfully" in result.output
     assert "Success! Recording saved to" in result.output
+    assert "Transcript" in result.output
+    assert "This is a mock speech transcript." in result.output
 
 
 def test_cli_analyze_command_error_handling():
@@ -239,3 +250,21 @@ def test_cli_analyze_command_unexpected_error(mock_sounddevice):
 
         assert result.exit_code == 1
         assert "Unexpected Error" in result.output
+
+
+@patch("voicelens.transcriber.whisper.WhisperModel")
+def test_cli_analyze_command_transcription_error(mock_whisper, mock_sounddevice):
+    """Verify that 'voicelens analyze' handles transcription failures gracefully."""
+    assert mock_sounddevice is not None
+
+    # Force WhisperModel.transcribe to raise an exception
+    mock_model = MagicMock()
+    mock_whisper.return_value = mock_model
+    mock_model.transcribe.side_effect = Exception("Whisper failed")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["analyze"], input="\n\n")
+
+    assert result.exit_code == 1
+    assert "Transcription Error" in result.output
+    assert "transcription failed" in result.output
