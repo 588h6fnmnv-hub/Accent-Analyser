@@ -13,6 +13,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from voicelens.recorder.audio import AudioRecorder, AudioRecorderError
+from voicelens.transcriber.whisper import WhisperTranscriber, WhisperTranscriberError
 
 # Initialize Rich Console
 console = Console()
@@ -30,8 +31,7 @@ def perform_analysis_recording() -> Path:
     # 1. Display Rich Panel explaining what will happen
     explanation = (
         "VoiceLens will record audio from your default microphone.\n"
-        "This tool only captures raw audio and does not perform speech-to-text "
-        "yet.\n\n"
+        "After recording, VoiceLens will automatically transcribe your audio.\n\n"
         "[bold green]Steps:[/bold green]\n"
         "1. Press [bold cyan]ENTER[/bold cyan] to start recording.\n"
         "2. Speak into your microphone.\n"
@@ -40,7 +40,7 @@ def perform_analysis_recording() -> Path:
     console.print(
         Panel(
             explanation,
-            title="🎙️ [bold cyan]VoiceLens Audio Recorder[/bold cyan]",
+            title="🎙️ [bold cyan]VoiceLens Audio Recorder & Transcriber[/bold cyan]",
             border_style="cyan",
             expand=False,
         )
@@ -111,8 +111,9 @@ def perform_analysis_recording() -> Path:
 
 # Define Typer Command
 def analyze_command() -> None:
-    """Record audio from the default microphone and save it as a WAV file."""
+    """Record audio from the default microphone, save it, and transcribe it."""
     try:
+        # 1. Record audio
         saved_path = perform_analysis_recording()
         console.print(
             Panel(
@@ -123,12 +124,41 @@ def analyze_command() -> None:
                 expand=False,
             )
         )
+
+        # 2. Transcribe audio
+        transcript = ""
+        with console.status(
+            "[bold cyan]Transcribing audio using Whisper...[/bold cyan]"
+        ):
+            transcriber = WhisperTranscriber()
+            transcript = transcriber.transcribe(saved_path)
+
+        # 3. Display transcript in a Rich panel
+        if not transcript:
+            transcript = "[italic dim]No speech detected in the recording.[/italic dim]"
+
+        console.print(
+            Panel(
+                transcript,
+                title="📝 [bold cyan]Transcript[/bold cyan]",
+                border_style="cyan",
+                expand=False,
+            )
+        )
+
     except AudioRecorderError as e:
         msg = (
             "[yellow]Please check your system audio settings, "
             "microphone connection, and permissions.[/yellow]"
         )
         console.print(f"\n[bold red]❌ Audio Recording Error:[/bold red] {e}\n{msg}")
+        raise typer.Exit(code=1) from e
+    except WhisperTranscriberError as e:
+        msg = (
+            "[yellow]The recording was saved successfully, "
+            "but transcription failed.[/yellow]"
+        )
+        console.print(f"\n[bold red]❌ Transcription Error:[/bold red] {e}\n{msg}")
         raise typer.Exit(code=1) from e
     except Exception as e:
         console.print(f"\n[bold red]❌ Unexpected Error:[/bold red] {e}")
