@@ -54,7 +54,7 @@ def doctor() -> None:
 
 @app.command()
 def analyze() -> None:
-    """Record audio from the default microphone and save it as a WAV file."""
+    """Record audio from the default microphone and analyze speaker characteristics."""
     analyze_command()
 
 

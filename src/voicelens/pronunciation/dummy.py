@@ -16,11 +16,12 @@ class DummyBackend(PronunciationBackend):
             _transcript: Expected text transcription.
 
         Returns:
-            PronunciationResult: Default placeholder results with score=None.
+            PronunciationResult: Default placeholder results.
         """
         return PronunciationResult(
-            pronunciation_score=None,
-            confidence=None,
+            overall_score=85.0,
+            pronunciation_similarity=0.88,
+            confidence=0.92,
             backend="dummy",
-            notes=[],
+            notes=["Placeholder pronunciation assessment succeeded."],
         )

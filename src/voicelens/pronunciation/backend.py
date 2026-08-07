@@ -7,16 +7,17 @@ from pathlib import Path
 
 @dataclass
 class PronunciationResult:
-    """Dataclass holding modular pronunciation assessment results."""
+    """Dataclass holding pronunciation assessment results."""
 
-    pronunciation_score: float | None
-    confidence: float | None
+    overall_score: float
+    pronunciation_similarity: float
+    confidence: float
     backend: str
     notes: list[str]
 
 
 class PronunciationBackend(abc.ABC):
-    """Abstract base class for all pronunciation assessment backends."""
+    """Abstract base class for pronunciation assessment backends."""
 
     @abc.abstractmethod
     def analyze(self, audio_path: str | Path, transcript: str) -> PronunciationResult:

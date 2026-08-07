@@ -23,7 +23,8 @@ class MockCustomBackend(PronunciationBackend):
         assert transcript is not None
 
         return PronunciationResult(
-            pronunciation_score=0.92,
+            overall_score=92.0,
+            pronunciation_similarity=0.95,
             confidence=0.95,
             backend="mock_custom",
             notes=["High acoustic clarity.", "Phonetic matching succeeded."],
@@ -65,10 +66,10 @@ def test_dummy_backend_direct(fake_audio_file):
     backend = DummyBackend()
     res = backend.analyze(fake_audio_file, "Hello world")
 
-    assert res.pronunciation_score is None
-    assert res.confidence is None
+    assert res.overall_score == 85.0
+    assert res.pronunciation_similarity == 0.88
+    assert res.confidence == 0.92
     assert res.backend == "dummy"
-    assert res.notes == []
 
 
 def test_pronunciation_analyzer_default_dummy(fake_audio_file):
@@ -77,7 +78,7 @@ def test_pronunciation_analyzer_default_dummy(fake_audio_file):
     assert isinstance(analyzer.backend, DummyBackend)
 
     res = analyzer.analyze(fake_audio_file, "Some expected speech")
-    assert res.pronunciation_score is None
+    assert res.overall_score == 85.0
     assert res.backend == "dummy"
 
 
@@ -101,7 +102,8 @@ def test_pronunciation_backend_swappability(fake_audio_file):
     analyzer = PronunciationAnalyzer(backend=custom_backend)
 
     res = analyzer.analyze(fake_audio_file, "Spoken text")
-    assert res.pronunciation_score == 0.92
+    assert res.overall_score == 92.0
+    assert res.pronunciation_similarity == 0.95
     assert res.confidence == 0.95
     assert res.backend == "mock_custom"
     assert "High acoustic clarity." in res.notes

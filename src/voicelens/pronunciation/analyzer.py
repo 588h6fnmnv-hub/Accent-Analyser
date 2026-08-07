@@ -32,8 +32,7 @@ class PronunciationAnalyzer:
             transcript: Expected text transcription of the spoken audio.
 
         Returns:
-            PronunciationResult: Results containing score, confidence, backend name,
-                                 and notes.
+            PronunciationResult: Results containing score, confidence, and notes.
 
         Raises:
             PronunciationAnalyzerError: If validation fails or backend errors.
