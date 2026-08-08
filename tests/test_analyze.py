@@ -25,9 +25,7 @@ class MockInputStream:
     def start(self):
         self._running = True
         # Simulate incoming mock audio data chunk immediately
-        # Float32 array of shape (frames, channels)
         mock_data = np.zeros((1024, self.channels), dtype=np.float32)
-        # Add some mock sine wave audio
         mock_data[:, 0] = np.sin(np.linspace(0, 10 * np.pi, 1024))
         self.callback(mock_data, 1024, None, None)
 
@@ -42,7 +40,6 @@ class MockInputStream:
 def mock_sounddevice():
     """Mock sounddevice module successfully."""
     mock_sd = MagicMock()
-    # Mock query_devices to return a simulated microphone
     mock_sd.query_devices.return_value = [
         {"name": "Mock Microphone", "max_input_channels": 2}
     ]
@@ -85,8 +82,7 @@ def test_audio_recorder_happy_path(mock_sounddevice):
         recorder.save_wav(file_path)
 
         assert file_path.exists()
-        # Verify it has some file size
-        assert file_path.stat().st_size > 44  # WAV header is 44 bytes
+        assert file_path.stat().st_size > 44
 
 
 def test_audio_recorder_errors(mock_sounddevice):
@@ -172,7 +168,6 @@ def test_audio_recorder_status_callback(mock_sounddevice):
     """Verify sounddevice callback handles status flags correctly."""
     assert mock_sounddevice is not None
     recorder = AudioRecorder()
-    # Capture the callback
     captured_callback = None
 
     def mock_input_stream_init(samplerate, channels, dtype, callback):
@@ -183,7 +178,6 @@ def test_audio_recorder_status_callback(mock_sounddevice):
     mock_sounddevice.InputStream = mock_input_stream_init
     recorder.start_recording()
 
-    # Call with non-empty status flag
     assert captured_callback is not None
     captured_callback(np.zeros((10, 1), dtype=np.float32), 10, None, "overflow")
 
@@ -202,17 +196,69 @@ def test_audio_recorder_missing_sounddevice():
             recorder.start_recording()
 
 
+class MockWord:
+    """Mock for faster-whisper word level output."""
+
+    def __init__(self, word: str, start: float, end: float, probability: float):
+        self.word = word
+        self.start = start
+        self.end = end
+        self.probability = probability
+
+
+class MockSegment:
+    """Mock for faster-whisper segment object."""
+
+    def __init__(self, text: str, words: list[MockWord] | None = None):
+        self.text = text
+        self.words = words or []
+
+
+@patch("voicelens.accent.classifier.EncoderClassifier")
+@patch("voicelens.pronunciation.speechbrain_backend.EncoderClassifier")
 @patch("voicelens.transcriber.whisper.WhisperModel")
-def test_cli_analyze_command_success(mock_whisper, mock_sounddevice):
+def test_cli_analyze_command_success(
+    mock_whisper, mock_pron_sb, mock_accent_sb, mock_sounddevice
+):
     """Verify that 'voicelens analyze' completes happily with mocked user inputs."""
     assert mock_sounddevice is not None
 
-    # Setup mock WhisperModel instance
+    # 1. Mock Whisper transcription model
     mock_model = MagicMock()
     mock_whisper.return_value = mock_model
-    mock_segment = MagicMock()
-    mock_segment.text = "This is a mock speech transcript."
-    mock_model.transcribe.return_value = ([mock_segment], MagicMock())
+    mock_words = [
+        MockWord("This", 0.1, 0.4, 0.98),
+        MockWord("is", 0.4, 0.7, 0.92),
+        MockWord("mock", 0.7, 1.1, 0.35),  # Trigger low confidence mispronunciation!
+    ]
+    mock_model.transcribe.return_value = (
+        [MockSegment("This is mock", mock_words)],
+        MagicMock(),
+    )
+
+    # 2. Mock SpeechBrain Pronunciation assessment model
+    mock_pron_classifier = MagicMock()
+    mock_pron_sb.from_hparams.return_value = mock_pron_classifier
+    mock_pron_classifier.classify_batch.return_value = (
+        None,
+        None,
+        torch_tensor_mock([[0.82]]),
+        ["en"],
+    )
+    mock_pron_classifier.encode_batch.return_value = torch_tensor_mock([[[0.42] * 192]])
+
+    # 3. Mock SpeechBrain Accent classifier model
+    mock_accent_classifier = MagicMock()
+    mock_accent_sb.from_hparams.return_value = mock_accent_classifier
+    mock_accent_classifier.classify_batch.return_value = (
+        None,
+        None,
+        torch_tensor_mock([[0.95]]),
+        ["en"],
+    )
+    mock_accent_classifier.encode_batch.return_value = torch_tensor_mock(
+        [[[0.55] * 192]]
+    )
 
     runner = CliRunner()
     # Simulate user pressing ENTER twice: once to start, once to stop
@@ -223,13 +269,31 @@ def test_cli_analyze_command_success(mock_whisper, mock_sounddevice):
     assert "Recording stopped successfully" in result.output
     assert "Success! Recording saved to" in result.output
     assert "Transcript" in result.output
-    assert "This is a mock speech transcript." in result.output
+    assert "This is mock" in result.output
+    assert "Pronunciation & Accent Profile" in result.output
+    assert "Overall Pronunciation Score" in result.output
+    assert "Speech Delivery Metrics" in result.output
+    assert "Detected Filler Words" in result.output
+
+
+def torch_tensor_mock(values):
+    """Helper to create a torch-like mock object containing numpy elements."""
+    mock_tensor = MagicMock()
+    mock_tensor.max.return_value = MagicMock(item=lambda: values[0][0])
+    mock_tensor.item.return_value = values[0][0]
+    # Set slice returns
+    mock_tensor.__getitem__.return_value = mock_tensor
+    mock_tensor.shape = np.array(values).shape
+    mock_tensor.squeeze.return_value = mock_tensor
+    mock_tensor.cpu.return_value = mock_tensor
+    mock_tensor.numpy.return_value = np.array(values)
+    mock_tensor.mean.return_value = mock_tensor
+    return mock_tensor
 
 
 def test_cli_analyze_command_error_handling():
     """Verify that 'voicelens analyze' handles recording errors gracefully."""
     runner = CliRunner()
-    # Simulate PortAudio missing to trigger AudioRecorderError
     with patch("voicelens.recorder.audio._SOUNDDEVICE_AVAILABLE", False):
         result = runner.invoke(app, ["analyze"], input="\n\n")
 
@@ -252,12 +316,17 @@ def test_cli_analyze_command_unexpected_error(mock_sounddevice):
         assert "Unexpected Error" in result.output
 
 
+@patch("voicelens.accent.classifier.EncoderClassifier")
+@patch("voicelens.pronunciation.speechbrain_backend.EncoderClassifier")
 @patch("voicelens.transcriber.whisper.WhisperModel")
-def test_cli_analyze_command_transcription_error(mock_whisper, mock_sounddevice):
+def test_cli_analyze_command_transcription_error(
+    mock_whisper, mock_pron_sb, mock_accent_sb, mock_sounddevice
+):
     """Verify that 'voicelens analyze' handles transcription failures gracefully."""
     assert mock_sounddevice is not None
+    assert mock_pron_sb is not None
+    assert mock_accent_sb is not None
 
-    # Force WhisperModel.transcribe to raise an exception
     mock_model = MagicMock()
     mock_whisper.return_value = mock_model
     mock_model.transcribe.side_effect = Exception("Whisper failed")
