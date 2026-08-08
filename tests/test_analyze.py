@@ -276,6 +276,54 @@ def test_cli_analyze_command_success(
     assert "Detected Filler Words" in result.output
 
 
+@patch("voicelens.accent.classifier.EncoderClassifier")
+@patch("voicelens.pronunciation.speechbrain_backend.EncoderClassifier")
+@patch("voicelens.transcriber.whisper.WhisperModel")
+def test_cli_analyze_command_partial_failure(
+    mock_whisper, mock_pron_sb, mock_accent_sb, mock_sounddevice
+):
+    """Verify that 'voicelens analyze' tolerates backend failures gracefully."""
+    assert mock_sounddevice is not None
+
+    # 1. Mock Whisper transcription model to succeed
+    mock_model = MagicMock()
+    mock_whisper.return_value = mock_model
+    mock_words = [
+        MockWord("This", 0.1, 0.4, 0.98),
+        MockWord("is", 0.4, 0.7, 0.92),
+    ]
+    mock_model.transcribe.return_value = (
+        [MockSegment("This is", mock_words)],
+        MagicMock(),
+    )
+
+    # 2. Mock SpeechBrain Accent classifier to fail with an exception
+    mock_accent_classifier = MagicMock()
+    mock_accent_sb.from_hparams.return_value = mock_accent_classifier
+    mock_accent_classifier.classify_batch.side_effect = RuntimeError(
+        "Centroid classification failed"
+    )
+
+    # 3. Mock Pronunciation assessment to fail
+    mock_pron_classifier = MagicMock()
+    mock_pron_sb.from_hparams.return_value = mock_pron_classifier
+    mock_pron_classifier.classify_batch.side_effect = RuntimeError(
+        "Phonetic parse error"
+    )
+
+    runner = CliRunner()
+    # Simulate user pressing ENTER twice: once to start, once to stop
+    result = runner.invoke(app, ["analyze"], input="\n\n")
+
+    # Command should STILL exit with 0 and complete successfully!
+    assert result.exit_code == 0
+    assert "Warning (Accent Classification)" in result.output
+    assert "Warning (Pronunciation Assessment)" in result.output
+    assert "Speech Delivery Metrics" in result.output
+    assert "Predicted Accent" in result.output
+    assert "N/A (Failed)" in result.output
+
+
 def torch_tensor_mock(values):
     """Helper to create a torch-like mock object containing numpy elements."""
     mock_tensor = MagicMock()
