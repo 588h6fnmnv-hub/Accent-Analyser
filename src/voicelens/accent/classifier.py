@@ -186,15 +186,22 @@ class AccentClassifier:
         predicted_accent, confidence = sorted_accents[0]
         top_3 = sorted_accents[:3]
 
+        # Explicitly enforce bounds: 0.0 to 1.0
+        confidence = max(0.0, min(1.0, confidence))
+
         notes = [
             f"Accent embeddings processed via {classifier.__class__.__name__}.",
             f"Determined accent similarities: "
             f"{ {acc: round(sim, 4) for acc, sim in similarities.items()} }.",
+            "Disclaimer: This is an Estimated Accent based on heuristic ECAPA-TDNN "
+            "similarities and is not clinically or scientifically validated.",
         ]
 
         return AccentResult(
             predicted_accent=predicted_accent,
             confidence=round(confidence, 4),
-            top_3_accents=[(acc, round(prob, 4)) for acc, prob in top_3],
+            top_3_accents=[
+                (acc, round(max(0.0, min(1.0, prob)), 4)) for acc, prob in top_3
+            ],
             notes=notes,
         )
