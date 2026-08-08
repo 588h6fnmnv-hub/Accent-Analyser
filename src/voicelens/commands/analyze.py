@@ -120,17 +120,33 @@ def perform_analysis_recording() -> Path:
 
 
 def generate_overall_feedback(
-    pron_score: float, wpm: float, filler_count: int, detected_accent: str
+    pron_score: float | None,
+    wpm: float | None,
+    filler_count: int | None,
+    detected_accent: str | None,
 ) -> str:
     """Helper to generate data-driven overall feedback based on the computed metrics."""
     feedback = [
         "[bold cyan]VoiceLens Comprehensive Assessment Feedback[/bold cyan]\n",
-        f"• [bold]Accent Profile:[/bold] Detected accent is "
-        f"[green]{detected_accent}[/green].",
     ]
+    if detected_accent:
+        feedback.append(
+            f"• [bold]Accent Profile:[/bold] Detected accent is "
+            f"[green]{detected_accent}[/green]."
+        )
+    else:
+        feedback.append(
+            "• [bold]Accent Profile:[/bold] Accent classification "
+            "failed or was skipped."
+        )
 
     # Pronunciation feedback
-    if pron_score >= 80.0:
+    if pron_score is None:
+        feedback.append(
+            "• [bold]Pronunciation:[/bold] Pronunciation assessment "
+            "failed or was skipped."
+        )
+    elif pron_score >= 80.0:
         feedback.append(
             "• [bold]Pronunciation:[/bold] [green]Excellent clarity![/green] "
             "Your spoken acoustic features align closely with target speech standards."
@@ -147,7 +163,12 @@ def generate_overall_feedback(
         )
 
     # Pace feedback
-    if wpm > 160.0:
+    if wpm is None:
+        feedback.append(
+            "• [bold]Pace (Speed):[/bold] Speech delivery pace "
+            "metrics failed or were skipped."
+        )
+    elif wpm > 160.0:
         feedback.append(
             "• [bold]Pace (Speed):[/bold] [yellow]Fast speaking rate.[/yellow] "
             "Try slowing down slightly to make your speech easier to follow."
@@ -168,7 +189,11 @@ def generate_overall_feedback(
         )
 
     # Filler words feedback
-    if filler_count > 4:
+    if filler_count is None:
+        feedback.append(
+            "• [bold]Filler Words:[/bold] Filler word tracking failed or was skipped."
+        )
+    elif filler_count > 4:
         feedback.append(
             "• [bold]Filler Words:[/bold] [yellow]High filler density.[/yellow] "
             "Try to reduce unconscious fillers to sound more authoritative."
@@ -243,16 +268,56 @@ def analyze_command() -> None:
                 )
                 future_accent = executor.submit(accent_classifier.classify, saved_path)
 
-                # Fetch concurrent task results
-                align_result = future_align.result()
-                metrics = future_metrics.result()
-                pron_result = future_pron.result()
-                accent_result = future_accent.result()
+                # Fetch concurrent task results with robust try-except wrappers
+                align_result = None
+                try:
+                    align_result = future_align.result()
+                except Exception as e:
+                    console.print(
+                        f"\n[bold yellow]⚠️  Warning (Forced Alignment):"
+                        f"[/bold yellow] Failed to align audio timing. Details: {e}"
+                    )
+
+                metrics = None
+                try:
+                    metrics = future_metrics.result()
+                except Exception as e:
+                    console.print(
+                        f"\n[bold yellow]⚠️  Warning (Speech Metrics):"
+                        f"[/bold yellow] Failed to compute delivery metrics. "
+                        f"Details: {e}"
+                    )
+
+                pron_result = None
+                try:
+                    pron_result = future_pron.result()
+                except Exception as e:
+                    console.print(
+                        "\n[bold yellow]⚠️  Warning (Pronunciation Assessment):"
+                        f"[/bold yellow] Failed to analyze score. Details: {e}"
+                    )
+
+                accent_result = None
+                try:
+                    accent_result = future_accent.result()
+                except Exception as e:
+                    console.print(
+                        "\n[bold yellow]⚠️  Warning (Accent Classification):"
+                        f"[/bold yellow] Failed to classify accent. Details: {e}"
+                    )
 
             # Identify words likely mispronounced sorted worst first
-            mispronounced_list = mis_analyzer.detect(
-                align_result, pron_result.pronunciation_similarity
-            )
+            mispronounced_list = []
+            if align_result and pron_result:
+                try:
+                    mispronounced_list = mis_analyzer.detect(
+                        align_result, pron_result.pronunciation_similarity
+                    )
+                except Exception as e:
+                    console.print(
+                        "\n[bold yellow]⚠️  Warning (Mispronunciation Detection):"
+                        f"[/bold yellow] Failed to identify words. Details: {e}"
+                    )
 
         # 5. Render Beautiful Rich Console UI Layout
         ui_title = "📊 [bold cyan]VoiceLens Comprehensive Audio Analysis[/bold cyan]\n"
@@ -268,32 +333,58 @@ def analyze_command() -> None:
         accent_table.add_column("Result", justify="left")
         accent_table.add_column("Details / Confidence", justify="left")
 
-        accent_table.add_row(
-            "Predicted Accent",
-            f"[bold green]{accent_result.predicted_accent}[/bold green]",
-            f"Confidence: {accent_result.confidence * 100:.1f}%",
-        )
-        sim_percentage = pron_result.pronunciation_similarity * 100.0
-        accent_table.add_row(
-            "Phonetic Similarity",
-            f"[bold green]{sim_percentage:.1f}%[/bold green]",
-            "ECAPA-TDNN embedding match factor",
-        )
-        accent_table.add_row(
-            "Overall Score",
-            f"[bold cyan]{pron_result.overall_score:.1f} / 100[/bold cyan]",
-            f"Confidence: {pron_result.confidence * 100:.1f}%",
-        )
+        if accent_result:
+            accent_table.add_row(
+                "Predicted Accent",
+                f"[bold green]{accent_result.predicted_accent}[/bold green]",
+                f"Confidence: {accent_result.confidence * 100:.1f}%",
+            )
+        else:
+            accent_table.add_row(
+                "Predicted Accent",
+                "[yellow]N/A (Failed)[/yellow]",
+                "[dim]Accent classification failed[/dim]",
+            )
+
+        if pron_result:
+            sim_percentage = pron_result.pronunciation_similarity * 100.0
+            accent_table.add_row(
+                "Phonetic Similarity",
+                f"[bold green]{sim_percentage:.1f}%[/bold green]",
+                "ECAPA-TDNN embedding match factor",
+            )
+            accent_table.add_row(
+                "Overall Score",
+                f"[bold cyan]{pron_result.overall_score:.1f} / 100[/bold cyan]",
+                f"Confidence: {pron_result.confidence * 100:.1f}%",
+            )
+        else:
+            accent_table.add_row(
+                "Phonetic Similarity",
+                "[yellow]N/A (Failed)[/yellow]",
+                "[dim]Embedding similarity failed[/dim]",
+            )
+            accent_table.add_row(
+                "Overall Score",
+                "[yellow]N/A (Failed)[/yellow]",
+                "[dim]Pronunciation assessment failed[/dim]",
+            )
         console.print(accent_table)
 
         # Overall Pronunciation Score Progress Bar representation
-        score_pct = int(pron_result.overall_score)
-        filled_blocks = score_pct // 5
-        bar = "█" * filled_blocks + "░" * (20 - filled_blocks)
-        console.print(
-            f"\n[bold]Overall Pronunciation Score:[/bold] "
-            f"[cyan]{pron_result.overall_score:.1f}/100[/cyan]  |{bar}|\n"
-        )
+        if pron_result:
+            score_pct = int(pron_result.overall_score)
+            filled_blocks = score_pct // 5
+            bar = "█" * filled_blocks + "░" * (20 - filled_blocks)
+            console.print(
+                f"\n[bold]Overall Pronunciation Score:[/bold] "
+                f"[cyan]{pron_result.overall_score:.1f}/100[/cyan]  |{bar}|\n"
+            )
+        else:
+            console.print(
+                "\n[bold]Overall Pronunciation Score:[/bold] "
+                "[yellow]N/A (Failed)[/yellow]\n"
+            )
 
         # Speaking Speed, Words Per Minute, and Pause Statistics
         metrics_table = Table(
@@ -305,43 +396,59 @@ def analyze_command() -> None:
         metrics_table.add_column("Value", justify="left")
         metrics_table.add_column("Interpretation", justify="left")
 
-        metrics_table.add_row(
-            "Words Per Minute (WPM)",
-            f"[bold cyan]{metrics.words_per_minute:.1f}[/bold cyan]",
-            "Pace speed indicator",
-        )
-        metrics_table.add_row(
-            "Speaking Duration",
-            f"{metrics.duration_seconds:.2f}s",
-            "Total speaking time recorded",
-        )
-        metrics_table.add_row(
-            "Total Words",
-            str(metrics.word_count),
-            f"Avg {metrics.average_words_per_sentence:.1f} words per sentence",
-        )
-        metrics_table.add_row(
-            "Pause Count",
-            f"[bold yellow]{metrics.pause_count}[/bold yellow]",
-            f"Avg duration: {metrics.average_pause_duration:.2f}s",
-        )
-        metrics_table.add_row(
-            "Longest Pause",
-            f"{metrics.longest_pause:.2f}s",
-            "Max non-speaking silent run",
-        )
+        if metrics:
+            metrics_table.add_row(
+                "Words Per Minute (WPM)",
+                f"[bold cyan]{metrics.words_per_minute:.1f}[/bold cyan]",
+                "Pace speed indicator",
+            )
+            metrics_table.add_row(
+                "Speaking Duration",
+                f"{metrics.duration_seconds:.2f}s",
+                "Total speaking time recorded",
+            )
+            metrics_table.add_row(
+                "Total Words",
+                str(metrics.word_count),
+                f"Avg {metrics.average_words_per_sentence:.1f} words per sentence",
+            )
+            metrics_table.add_row(
+                "Pause Count",
+                f"[bold yellow]{metrics.pause_count}[/bold yellow]",
+                f"Avg duration: {metrics.average_pause_duration:.2f}s",
+            )
+            metrics_table.add_row(
+                "Longest Pause",
+                f"{metrics.longest_pause:.2f}s",
+                "Max non-speaking silent run",
+            )
+        else:
+            for item in [
+                "Words Per Minute (WPM)",
+                "Speaking Duration",
+                "Total Words",
+                "Pause Count",
+                "Longest Pause",
+            ]:
+                metrics_table.add_row(
+                    item, "[yellow]N/A[/yellow]", "[dim]Metrics analysis failed[/dim]"
+                )
         console.print(metrics_table)
 
         # Filler words statistics
-        fillers_str = (
-            ", ".join([f"[bold red]{f}[/bold red]" for f in metrics.filler_words])
-            if metrics.filler_words
-            else "[green]None detected[/green]"
-        )
-        console.print(
-            f"\n[bold]Detected Filler Words:[/bold] "
-            f"[bold yellow]{metrics.filler_word_count}[/bold yellow] | {fillers_str}"
-        )
+        if metrics:
+            f_count = metrics.filler_word_count
+            fillers_str = (
+                ", ".join([f"[bold red]{f}[/bold red]" for f in metrics.filler_words])
+                if metrics.filler_words
+                else "[green]None detected[/green]"
+            )
+            console.print(
+                f"\n[bold]Detected Filler Words:[/bold] "
+                f"[bold yellow]{f_count}[/bold yellow] | {fillers_str}"
+            )
+        else:
+            console.print("\n[bold]Detected Filler Words:[/bold] [yellow]N/A[/yellow]")
 
         # Top 10 difficult/mispronounced words (worst first)
         diff_table = Table(
@@ -374,18 +481,23 @@ def analyze_command() -> None:
             console.print(diff_empty_msg)
 
         # Overall Feedback Panel
-        border_col = "green" if pron_result.overall_score >= 75.0 else "yellow"
-        if pron_result.overall_score < 50.0:
+        p_score = pron_result.overall_score if pron_result else None
+        m_wpm = metrics.words_per_minute if metrics else None
+        m_filler = metrics.filler_word_count if metrics else None
+        a_accent = accent_result.predicted_accent if accent_result else None
+
+        border_col = "green" if p_score and p_score >= 75.0 else "yellow"
+        if p_score and p_score < 50.0:
             border_col = "red"
 
         console.print("\n")
         console.print(
             Panel(
                 generate_overall_feedback(
-                    pron_result.overall_score,
-                    metrics.words_per_minute,
-                    metrics.filler_word_count,
-                    accent_result.predicted_accent,
+                    p_score,
+                    m_wpm,
+                    m_filler,
+                    a_accent,
                 ),
                 title="💡 [bold]Overall Audio Analysis Feedback[/bold]",
                 border_style=border_col,
