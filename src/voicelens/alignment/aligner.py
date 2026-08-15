@@ -1,5 +1,6 @@
 """VoiceLens Forced Alignment and Word/Phoneme Timing Extraction."""
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -82,8 +83,6 @@ def convert_word_to_phonemes(word: str) -> list[str]:
 
 def re_clean_word(word: str) -> str:
     """Removes punctuation and returns lowercase alphabetic characters."""
-    import re
-
     return re.sub(r"[^a-zA-Z]", "", word).lower()
 
 
@@ -97,9 +96,12 @@ class WhisperAligner:
     def align(self, audio_path: str | Path, transcript: str) -> AlignmentResult:
         """Runs word-level forced alignment and extracts timing information.
 
+        Only words present in the user transcript (ignoring case/punctuation)
+        are aligned. Hallucinated words are filtered out.
+
         Args:
             audio_path: Path to the recorded audio file.
-            transcript: Transcribed text (used to confirm alignment words).
+            transcript: Transcribed reference text.
 
         Returns:
             AlignmentResult: Word and phoneme alignment timings.
@@ -111,6 +113,13 @@ class WhisperAligner:
         # Basic input validation
         if not transcript.strip():
             return AlignmentResult(words=[], notes=["Empty transcript provided."])
+
+        # Extract and normalize valid words from the original transcript
+        transcript_words = set()
+        for word_candidate in re.findall(r"[a-zA-Z']+", transcript):
+            cleaned = re_clean_word(word_candidate)
+            if cleaned:
+                transcript_words.add(cleaned)
 
         # Ensure we have a valid model instance loaded
         model = self.transcriber._get_model()
@@ -125,9 +134,13 @@ class WhisperAligner:
             if hasattr(segment, "words") and segment.words:
                 for w in segment.words:
                     word_str = w.word.strip()
-                    # Clean punctuation from surrounding word text
                     cleaned_word = re_clean_word(word_str)
                     if not cleaned_word:
+                        continue
+
+                    # Eliminate any Whisper hallucinated tokens that do not
+                    # exist in the transcript
+                    if cleaned_word not in transcript_words:
                         continue
 
                     # Produce estimated phoneme timings by distributing word duration
@@ -154,7 +167,8 @@ class WhisperAligner:
                             word=word_str,
                             start_time=round(w.start, 4),
                             end_time=round(w.end, 4),
-                            confidence=round(w.probability, 4),
+                            # Explicitly bound Whisper confidence to 0.0 - 1.0
+                            confidence=round(max(0.0, min(1.0, w.probability)), 4),
                             phonemes=phoneme_alignments,
                         )
                     )
