@@ -5,9 +5,13 @@ import { Square } from 'lucide-react';
 
 interface RecordingViewProps {
   onStopRecording: (blob: Blob) => void;
+  onError?: (error: string) => void;
 }
 
-export const RecordingView: React.FC<RecordingViewProps> = ({ onStopRecording }) => {
+export const RecordingView: React.FC<RecordingViewProps> = ({
+  onStopRecording,
+  onError,
+}) => {
   const [seconds, setSeconds] = useState(0);
   const [audioLevel, setAudioLevel] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -19,10 +23,23 @@ export const RecordingView: React.FC<RecordingViewProps> = ({ onStopRecording })
 
     async function startMediaRecorder() {
       try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('Microphone recording is not supported in this browser.');
+        }
+
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-        // Setup MediaRecorder
-        const mediaRecorder = new MediaRecorder(stream);
+        // Detect supported mimeType
+        let options: MediaRecorderOptions = {};
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          options = { mimeType: 'audio/webm;codecs=opus' };
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+          options = { mimeType: 'audio/webm' };
+        } else if (MediaRecorder.isTypeSupported('audio/wav')) {
+          options = { mimeType: 'audio/wav' };
+        }
+
+        const mediaRecorder = new MediaRecorder(stream, options);
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
 
@@ -33,9 +50,11 @@ export const RecordingView: React.FC<RecordingViewProps> = ({ onStopRecording })
         };
 
         mediaRecorder.onstop = () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+          const finalBlob = new Blob(audioChunksRef.current, {
+            type: mediaRecorder.mimeType || 'audio/webm',
+          });
           stream.getTracks().forEach((track) => track.stop());
-          onStopRecording(audioBlob);
+          onStopRecording(finalBlob);
         };
 
         mediaRecorder.start();
@@ -46,7 +65,10 @@ export const RecordingView: React.FC<RecordingViewProps> = ({ onStopRecording })
         }, 1000);
 
         // Audio Level Analyser
-        const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+        const AudioContextClass =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        const audioContext = new AudioContextClass();
         const source = audioContext.createMediaStreamSource(stream);
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 64;
@@ -66,8 +88,13 @@ export const RecordingView: React.FC<RecordingViewProps> = ({ onStopRecording })
         };
 
         updateVolume();
-      } catch (err) {
+      } catch (err: unknown) {
         console.error('Error accessing microphone:', err);
+        const msg =
+          err instanceof Error
+            ? err.message
+            : 'Microphone permission denied or audio device unavailable.';
+        onError?.(msg);
       }
     }
 
@@ -77,7 +104,7 @@ export const RecordingView: React.FC<RecordingViewProps> = ({ onStopRecording })
       if (timer) clearInterval(timer);
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [onStopRecording]);
+  }, [onStopRecording, onError]);
 
   const handleStopClick = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {

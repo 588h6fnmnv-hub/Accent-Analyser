@@ -31,6 +31,11 @@ export default function HomePage() {
     setState('RECORDING');
   };
 
+  const handleRecordingError = (err: string) => {
+    setErrorMessage(err);
+    setState('ERROR');
+  };
+
   const handleStopRecording = async (audioBlob: Blob) => {
     setState('ANALYZING');
     setErrorMessage(null);
@@ -40,7 +45,9 @@ export default function HomePage() {
       setState('RESULTS');
     } catch (err: unknown) {
       console.error('Analysis failed:', err);
-      setErrorMessage(err instanceof Error ? err.message : 'VoiceLens engine analysis error');
+      setErrorMessage(
+        err instanceof Error ? err.message : 'VoiceLens engine analysis error'
+      );
       setState('ERROR');
     }
   };
@@ -58,7 +65,12 @@ export default function HomePage() {
       <main>
         {state === 'IDLE' && <AnalyzeView onStartRecording={handleStartRecording} />}
 
-        {state === 'RECORDING' && <RecordingView onStopRecording={handleStopRecording} />}
+        {state === 'RECORDING' && (
+          <RecordingView
+            onStopRecording={handleStopRecording}
+            onError={handleRecordingError}
+          />
+        )}
 
         {state === 'ANALYZING' && <AnalyzingView />}
 
@@ -71,7 +83,9 @@ export default function HomePage() {
             <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10 text-red-500">
               <AlertTriangle className="h-8 w-8" />
             </div>
-            <h2 className="text-2xl font-bold text-[var(--text-primary)]">Analysis Engine Error</h2>
+            <h2 className="text-2xl font-bold text-[var(--text-primary)]">
+              Analysis Engine Error
+            </h2>
             <p className="mt-2 text-sm text-[var(--text-secondary)] font-mono">
               {errorMessage || 'Failed to process audio recording.'}
             </p>
