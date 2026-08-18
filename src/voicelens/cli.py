@@ -6,6 +6,7 @@ from rich.console import Console
 from voicelens import __version__
 from voicelens.commands.analyze import analyze_command
 from voicelens.commands.doctor import perform_system_checks
+from voicelens.commands.serve import serve_command
 
 # Initialize Rich Console
 console = Console()
@@ -56,6 +57,16 @@ def doctor() -> None:
 def analyze() -> None:
     """Record audio from the default microphone and analyze speaker characteristics."""
     analyze_command()
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host address to bind."),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to listen on."),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload."),
+) -> None:
+    """Start the VoiceLens HTTP API server for local or web frontend execution."""
+    serve_command(host=host, port=port, reload=reload)
 
 
 if __name__ == "__main__":

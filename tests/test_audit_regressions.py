@@ -38,9 +38,7 @@ class MockWhisperModel:
             MockWord(
                 "Ahmad", 0.6, 1.0, 1.5
             ),  # Out of bounds probability/confidence too!
-            MockWord(
-                "world", 1.1, 1.5, -0.2
-            ),  # Under bounds probability/confidence
+            MockWord("world", 1.1, 1.5, -0.2),  # Under bounds probability/confidence
         ]
         return [MockSegment(words)], None
 
@@ -87,8 +85,8 @@ def test_accent_classifier_disclaimer_and_bounds():
     import numpy as np
     import torch
 
-    mock_embeddings.squeeze.return_value.cpu.return_value.numpy.return_value = (
-        np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    mock_embeddings.squeeze.return_value.cpu.return_value.numpy.return_value = np.array(
+        [1.0, 2.0, 3.0, 4.0, 5.0]
     )
     mock_classifier.encode_batch.return_value = mock_embeddings
     classifier._classifier = mock_classifier
@@ -111,9 +109,9 @@ def test_accent_classifier_disclaimer_and_bounds():
             "not clinically or scientifically validated" in note
             for note in result.notes
         )
-        assert (
-            disclaimer_found
-        ), "Scientific disclaimer missing in accent classification result"
+        assert disclaimer_found, (
+            "Scientific disclaimer missing in accent classification result"
+        )
 
 
 def test_pronunciation_backend_bounds():
