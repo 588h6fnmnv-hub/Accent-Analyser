@@ -199,7 +199,44 @@ def run_voicelens_pipeline(
             )
             mispronounced_list = []
 
-    # 3. Format structured output dictionary
+    # 3. Compute realistic composite overall score reflecting component uncertainties
+    scores_with_weights = []
+
+    if pron_result is not None:
+        p_sim = max(0.0, min(1.0, pron_result.pronunciation_similarity))
+        p_conf = pron_result.confidence
+        if p_conf > 1.0:
+            p_conf = p_conf / 100.0
+        p_conf = max(0.0, min(1.0, p_conf))
+
+        scores_with_weights.append((0.40, p_sim * 100.0))
+        scores_with_weights.append((0.30, p_conf * 100.0))
+
+    if accent_result is not None:
+        a_conf = accent_result.confidence
+        if a_conf > 1.0:
+            a_conf = a_conf / 100.0
+        a_conf = max(0.0, min(1.0, a_conf))
+
+        scores_with_weights.append((0.20, a_conf * 100.0))
+
+    if align_result is not None and align_result.words:
+        w_confs = [
+            w.confidence / 100.0 if w.confidence > 1.0 else w.confidence
+            for w in align_result.words
+        ]
+        avg_w_conf = max(0.0, min(1.0, sum(w_confs) / len(w_confs)))
+        scores_with_weights.append((0.10, avg_w_conf * 100.0))
+
+    if scores_with_weights:
+        total_weight = sum(w for w, _ in scores_with_weights)
+        weighted_sum = sum(w * s for w, s in scores_with_weights)
+        overall_score = round(weighted_sum / total_weight, 2)
+        overall_score = max(0.0, min(100.0, overall_score))
+    else:
+        overall_score = 0.0
+
+    # 4. Format structured output dictionary
     analysis_id = f"vl-{datetime.now(UTC).strftime('%Y%m%d')}-{uuid.uuid4().hex[:4]}"
     created_at = datetime.now(UTC).isoformat()
 
@@ -227,7 +264,9 @@ def run_voicelens_pipeline(
     difficult_list = [
         {
             "word": item.word,
-            "confidence": item.confidence,
+            "confidence": (
+                item.confidence / 100.0 if item.confidence > 1.0 else item.confidence
+            ),
             "score": item.score,
             "startTime": item.start_time,
             "endTime": item.end_time,
@@ -237,8 +276,31 @@ def run_voicelens_pipeline(
         for item in mispronounced_list[:10]
     ]
 
+    accent_conf = accent_result.confidence if accent_result else 0.0
+    if accent_conf > 1.0:
+        accent_conf = accent_conf / 100.0
+    accent_conf = max(0.0, min(1.0, round(accent_conf, 4)))
+
+    pron_conf = pron_result.confidence if pron_result else 0.0
+    if pron_conf > 1.0:
+        pron_conf = pron_conf / 100.0
+    pron_conf = max(0.0, min(1.0, round(pron_conf, 4)))
+
+    pron_sim = pron_result.pronunciation_similarity if pron_result else 0.0
+    if pron_sim > 1.0:
+        pron_sim = pron_sim / 100.0
+    pron_sim = max(0.0, min(1.0, round(pron_sim, 4)))
+
+    top3_accents = []
+    if accent_result and accent_result.top_3_accents:
+        for acc, conf in accent_result.top_3_accents:
+            c_norm = conf / 100.0 if conf > 1.0 else conf
+            top3_accents.append(
+                {"accent": acc, "confidence": max(0.0, min(1.0, round(c_norm, 4)))}
+            )
+
     overall_feedback = generate_clean_feedback(
-        pron_score=pron_result.overall_score if pron_result else None,
+        pron_score=overall_score if pron_result or accent_result else None,
         wpm=wpm if metrics else None,
         filler_count=filler_count if metrics else None,
         detected_accent=accent_result.predicted_accent if accent_result else None,
@@ -257,19 +319,14 @@ def run_voicelens_pipeline(
             "predictedAccent": (
                 accent_result.predicted_accent if accent_result else "Unknown"
             ),
-            "confidence": accent_result.confidence if accent_result else 0.0,
-            "top3Accents": [
-                {"accent": acc, "confidence": conf}
-                for acc, conf in (accent_result.top_3_accents if accent_result else [])
-            ],
+            "confidence": accent_conf,
+            "top3Accents": top3_accents,
             "notes": accent_result.notes if accent_result else [],
         },
         "pronunciation": {
-            "overallScore": pron_result.overall_score if pron_result else 0.0,
-            "pronunciationSimilarity": (
-                pron_result.pronunciation_similarity if pron_result else 0.0
-            ),
-            "confidence": pron_result.confidence if pron_result else 0.0,
+            "overallScore": overall_score,
+            "pronunciationSimilarity": pron_sim,
+            "confidence": pron_conf,
             "backend": pron_result.backend if pron_result else "unknown",
             "notes": pron_result.notes if pron_result else [],
         },

@@ -9,6 +9,12 @@ interface ResultsDashboardProps {
   onNewAnalysis: () => void;
 }
 
+const formatConfidencePercent = (conf: number, decimals: number = 1): string => {
+  const norm = conf > 1.0 ? conf / 100.0 : conf;
+  const clamped = Math.max(0, Math.min(1, norm));
+  return (clamped * 100).toFixed(decimals);
+};
+
 export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
   result,
   onNewAnalysis,
@@ -77,7 +83,7 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
               />
             </div>
             <p className="mt-2 font-mono text-xs text-[var(--text-secondary)]">
-              Confidence: {(pronunciation.confidence * 100).toFixed(1)}%
+              Confidence: {formatConfidencePercent(pronunciation.confidence)}%
             </p>
           </div>
         </div>
@@ -94,7 +100,7 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
               {accent.predictedAccent}
             </span>
             <span className="ml-2 font-mono text-xs text-[var(--text-secondary)]">
-              ({(accent.confidence * 100).toFixed(1)}%)
+              ({formatConfidencePercent(accent.confidence)}%)
             </span>
           </div>
 
@@ -102,7 +108,9 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
             {accent.top3Accents.map((item, idx) => (
               <div key={idx} className="flex justify-between">
                 <span>{item.accent}</span>
-                <span className="text-[var(--text-primary)]">{(item.confidence * 100).toFixed(1)}%</span>
+                <span className="text-[var(--text-primary)]">
+                  {formatConfidencePercent(item.confidence)}%
+                </span>
               </div>
             ))}
           </div>
@@ -117,7 +125,7 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
 
           <div>
             <span className="font-mono text-4xl font-bold tracking-tight text-[var(--text-primary)]">
-              {(pronunciation.pronunciationSimilarity * 100).toFixed(1)}%
+              {formatConfidencePercent(pronunciation.pronunciationSimilarity)}%
             </span>
           </div>
 
@@ -226,7 +234,7 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
                   <div className="text-right">
                     <span className="block text-amber-400 font-semibold">{dw.score.toFixed(1)} / 100</span>
                     <span className="text-[10px] text-[var(--text-muted)]">
-                      {(dw.confidence * 100).toFixed(0)}% conf
+                      {formatConfidencePercent(dw.confidence, 0)}% conf
                     </span>
                   </div>
                 </div>
