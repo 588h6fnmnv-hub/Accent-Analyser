@@ -50,11 +50,20 @@ def test_analyze_empty_file():
     assert "empty" in response.json()["detail"].lower()
 
 
+def test_analyze_invalid_audio_conversion_failure():
+    """Verify POST /api/analyze returns 422 error when conversion fails."""
+    response = client.post(
+        "/api/analyze",
+        files={"file": ("recording.webm", b"INVALID_WEBM_BYTES_12345", "audio/webm")},
+    )
+    assert response.status_code == 422
+    assert "audio conversion failed" in response.json()["detail"].lower()
+
+
 def test_analyze_valid_audio():
-    """Verify POST /api/analyze returns real structured JSON pipeline analysis."""
+    """Verify POST /api/analyze converts audio and returns pipeline result."""
     wav_bytes = create_dummy_wav_bytes(1.0)
 
-    # Mock WhisperTranscriber inside pipeline
     mock_pipeline_result = {
         "id": "vl-20250815-test",
         "createdAt": "2025-08-15T10:00:00Z",
@@ -96,10 +105,10 @@ def test_analyze_valid_audio():
 
     with patch(
         "voicelens.api.app.run_voicelens_pipeline", return_value=mock_pipeline_result
-    ):
+    ) as mock_pipeline:
         response = client.post(
             "/api/analyze",
-            files={"file": ("recording.wav", wav_bytes, "audio/wav")},
+            files={"file": ("recording.webm", wav_bytes, "audio/webm")},
         )
 
         assert response.status_code == 200
@@ -110,3 +119,7 @@ def test_analyze_valid_audio():
         )
         assert data["accent"]["predictedAccent"] == "American English"
         assert data["pronunciation"]["overallScore"] == 88.0
+
+        # Confirm run_voicelens_pipeline received a converted .wav path ending in .wav
+        called_path = mock_pipeline.call_args[0][0]
+        assert str(called_path).endswith(".wav")
