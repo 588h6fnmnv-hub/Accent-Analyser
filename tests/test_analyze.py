@@ -276,14 +276,22 @@ def test_cli_analyze_command_success(
     assert "Detected Filler Words" in result.output
 
 
-@patch("voicelens.accent.classifier.EncoderClassifier")
-@patch("voicelens.pronunciation.speechbrain_backend.EncoderClassifier")
+@patch(
+    "voicelens.pipeline.AccentClassifier.classify",
+    side_effect=RuntimeError("Centroid classification failed"),
+)
+@patch(
+    "voicelens.pipeline.PronunciationAnalyzer.analyze",
+    side_effect=RuntimeError("Phonetic parse error"),
+)
 @patch("voicelens.transcriber.whisper.WhisperModel")
 def test_cli_analyze_command_partial_failure(
-    mock_whisper, mock_pron_sb, mock_accent_sb, mock_sounddevice
+    mock_whisper, mock_pron_analyze, mock_accent_classify, mock_sounddevice
 ):
     """Verify that 'voicelens analyze' tolerates backend failures gracefully."""
     assert mock_sounddevice is not None
+    assert mock_pron_analyze is not None
+    assert mock_accent_classify is not None
 
     # 1. Mock Whisper transcription model to succeed
     mock_model = MagicMock()
@@ -295,20 +303,6 @@ def test_cli_analyze_command_partial_failure(
     mock_model.transcribe.return_value = (
         [MockSegment("This is", mock_words)],
         MagicMock(),
-    )
-
-    # 2. Mock SpeechBrain Accent classifier to fail with an exception
-    mock_accent_classifier = MagicMock()
-    mock_accent_sb.from_hparams.return_value = mock_accent_classifier
-    mock_accent_classifier.classify_batch.side_effect = RuntimeError(
-        "Centroid classification failed"
-    )
-
-    # 3. Mock Pronunciation assessment to fail
-    mock_pron_classifier = MagicMock()
-    mock_pron_sb.from_hparams.return_value = mock_pron_classifier
-    mock_pron_classifier.classify_batch.side_effect = RuntimeError(
-        "Phonetic parse error"
     )
 
     runner = CliRunner()

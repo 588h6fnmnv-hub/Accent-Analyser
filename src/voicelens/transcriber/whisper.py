@@ -1,5 +1,6 @@
 """VoiceLens Whisper transcription implementation."""
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -17,18 +18,19 @@ class WhisperTranscriber:
 
     def __init__(
         self,
-        model_size: str = "tiny",
+        model_size: str | None = None,
         device: str = "cpu",
         compute_type: str = "float32",
     ) -> None:
         """Initializes the WhisperTranscriber.
 
         Args:
-            model_size: Size of the Whisper model to use (e.g. "tiny", "base").
+            model_size: Size of the Whisper model to use (defaults to
+                        VOICELENS_WHISPER_MODEL env var or "small").
             device: Computing device to use ("cpu", "cuda", etc.).
             compute_type: Precision type ("float32", "float16", "int8", etc.).
         """
-        self.model_size = model_size
+        self.model_size = model_size or os.getenv("VOICELENS_WHISPER_MODEL", "small")
         self.device = device
         self.compute_type = compute_type
         self._model: Any = None
