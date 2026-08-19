@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from voicelens.accent.classifier import AccentClassifier
 from voicelens.alignment.aligner import WhisperAligner
+from voicelens.pipeline import run_voicelens_pipeline
 from voicelens.pronunciation.speechbrain_backend import SpeechBrainBackend
 
 
@@ -147,7 +148,53 @@ def test_pronunciation_backend_bounds():
     ):
         result = backend.analyze("dummy.wav", "Hello world")
 
-        # Confidence should be rounded to 1.2, but overall_score (which uses
-        # confidence) must be bounded to 100.0 (overall_score = confidence * 100)
-        assert result.overall_score == 100.0
+        # Confidence should be rounded to 1.0 fraction
+        assert result.confidence == 1.0
+        assert result.overall_score <= 100.0
         assert 0.0 <= result.pronunciation_similarity <= 1.0
+
+
+def test_pipeline_overall_score_reflects_low_accent_confidence():
+    """Verify that overallScore reflects uncertainty in accent classification."""
+    mock_tx = MagicMock()
+    mock_tx.transcribe.return_value = "Hello world"
+
+    with (
+        patch("pathlib.Path.exists", return_value=True),
+        patch(
+            "voicelens.pipeline.AccentClassifier.classify",
+            return_value=MagicMock(
+                predicted_accent="American English",
+                confidence=0.354,  # Low confidence 35.4%
+                top_3_accents=[
+                    ("American English", 0.354),
+                    ("British English", 0.255),
+                    ("Indian English", 0.176),
+                ],
+                notes=[],
+            ),
+        ),
+        patch(
+            "voicelens.pipeline.PronunciationAnalyzer.analyze",
+            return_value=MagicMock(
+                overall_score=85.0,
+                pronunciation_similarity=0.85,
+                confidence=0.90,
+                backend="speechbrain",
+                notes=[],
+            ),
+        ),
+        patch(
+            "voicelens.pipeline.WhisperAligner.align",
+            return_value=MagicMock(words=[]),
+        ),
+    ):
+        res = run_voicelens_pipeline("dummy.wav", transcriber=mock_tx)
+
+        # Confirm confidence is strictly in [0.0, 1.0]
+        assert res["accent"]["confidence"] == 0.354
+        assert res["pronunciation"]["confidence"] == 0.90
+
+        # Confirm overallScore reflects low accent confidence (< 90.0)
+        assert res["pronunciation"]["overallScore"] < 90.0
+        assert res["pronunciation"]["overallScore"] == 75.64

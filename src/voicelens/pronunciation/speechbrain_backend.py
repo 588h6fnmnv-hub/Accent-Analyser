@@ -120,11 +120,16 @@ class SpeechBrainBackend(PronunciationBackend):
         embeddings = classifier.encode_batch(signal)
 
         # 3. Compute similarity and confidence
-        confidence = (
+        raw_conf = (
             float(posterior[0].max().item())
             if hasattr(posterior[0], "max")
             else float(posterior[0])
         )
+
+        # Normalize confidence to strictly 0.0 - 1.0 fraction
+        if 10.0 < raw_conf <= 100.0:
+            raw_conf = raw_conf / 100.0
+        confidence = max(0.0, min(1.0, raw_conf))
 
         # Estimate similarity from standard phonetic projection of the embedding
         mean_val = embeddings.mean()
@@ -134,8 +139,10 @@ class SpeechBrainBackend(PronunciationBackend):
             # Safe default fallback for mock objects during testing
             similarity = 0.88
 
-        # Compute overall_score scaled from 0 to 100
-        overall_score = round(confidence * 100.0, 2)
+        similarity = max(0.0, min(1.0, similarity))
+
+        # Compute overall_score scaled from 0 to 100 as weighted blend
+        overall_score = round((0.6 * similarity + 0.4 * confidence) * 100.0, 2)
         overall_score = max(0.0, min(100.0, overall_score))
 
         detected_lang = str(text_lab[0]) if text_lab else "unknown"
