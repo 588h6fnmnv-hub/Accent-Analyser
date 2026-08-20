@@ -78,11 +78,10 @@ def test_accent_classifier_disclaimer_and_bounds():
 
     Also verify it bounds confidence between 0.0 and 1.0.
     """
-    classifier = AccentClassifier()
-    # Mock SpeechBrain classifier's encode_batch method
+    classifier = AccentClassifier(min_duration_seconds=0.0)
     mock_classifier = MagicMock()
     mock_embeddings = MagicMock()
-    # Return a dummy embedding with 5 dimensions (to match supported accents)
+
     import numpy as np
     import torch
 
@@ -92,12 +91,14 @@ def test_accent_classifier_disclaimer_and_bounds():
     mock_classifier.encode_batch.return_value = mock_embeddings
     classifier._classifier = mock_classifier
 
+    # Pass 5 seconds of audio signal (80000 samples at 16kHz)
+    dummy_signal = torch.ones((1, 80000))
     with (
         patch("pathlib.Path.exists", return_value=True),
         patch.object(
             classifier,
             "_load_audio",
-            return_value=(torch.zeros(1, 16000), 16000),
+            return_value=(dummy_signal, 16000),
         ),
     ):
         result = classifier.classify("dummy.wav")
@@ -123,8 +124,6 @@ def test_pronunciation_backend_bounds():
     backend = SpeechBrainBackend()
     mock_classifier = MagicMock()
 
-    # Mock classification batch to return dummy posterior with extreme
-    # probability (e.g. 1.2)
     import torch
 
     mock_posterior = torch.tensor([1.2])

@@ -1,5 +1,6 @@
 """Tests for the VoiceLens Whisper transcriber."""
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -44,6 +45,16 @@ def mock_whisper_model():
         new=MockWhisperModel,
     ):
         yield
+
+
+def test_whisper_model_default_size():
+    """Verify that default model size is 'small' and configurable via env var."""
+    transcriber_default = WhisperTranscriber()
+    assert transcriber_default.model_size == "small"
+
+    with patch.dict(os.environ, {"VOICELENS_WHISPER_MODEL": "base"}):
+        transcriber_env = WhisperTranscriber()
+        assert transcriber_env.model_size == "base"
 
 
 def test_transcribe_success(mock_whisper_model):

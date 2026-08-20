@@ -51,15 +51,21 @@ class AccentClassifier:
         self,
         model_source: str = "speechbrain/lang-id-voxlingua107-ecapa",
         run_opts: dict[str, Any] | None = None,
+        min_duration_seconds: float = 5.0,
+        confidence_threshold: float = 0.50,
     ) -> None:
         """Initializes the AccentClassifier.
 
         Args:
             model_source: Pretrained SpeechBrain model to extract speech embeddings.
             run_opts: Run options for SpeechBrain model.
+            min_duration_seconds: Min clip duration required for classification.
+            confidence_threshold: Min confidence threshold (0.0 to 1.0) to report.
         """
         self.model_source = model_source
         self.run_opts = run_opts or {}
+        self.min_duration_seconds = min_duration_seconds
+        self.confidence_threshold = confidence_threshold
         self._classifier: Any = None
         self._centroids: dict[str, np.ndarray] = {}
 
@@ -115,7 +121,7 @@ class AccentClassifier:
             data_float = (data.astype(np.float32) - 128.0) / 128.0
         elif sampwidth == 4:  # 32-bit PCM
             data = np.frombuffer(raw_data, dtype=np.int32)
-            data_float = data.astype(np.float32) / 2147483648.0
+            data_float = (data.astype(np.float32) - 2147483648.0) / 2147483648.0
         else:
             raise ValueError(f"Unsupported sample width: {sampwidth} bytes")
 
@@ -134,6 +140,30 @@ class AccentClassifier:
         except (ImportError, RuntimeError, Exception):
             return self._load_audio_fallback(path)
 
+    def _preprocess_signal(self, signal: torch.Tensor) -> torch.Tensor:
+        """Preprocesses audio signal: mono, peak normalization, silence trimming."""
+        # Convert multi-channel to mono
+        if signal.shape[0] > 1:
+            signal = torch.mean(signal, dim=0, keepdim=True)
+
+        signal_1d = signal.squeeze(0)
+        if len(signal_1d) == 0:
+            return signal
+
+        # Peak normalization
+        max_val = torch.max(torch.abs(signal_1d)).item()
+        if max_val > 0:
+            signal_1d = (signal_1d / max_val) * 0.9
+
+        # Trim leading and trailing silence (< 0.01 peak threshold)
+        non_silent_indices = torch.where(torch.abs(signal_1d) >= 0.01)[0]
+        if len(non_silent_indices) > 0:
+            start_idx = int(non_silent_indices[0].item())
+            end_idx = int(non_silent_indices[-1].item()) + 1
+            signal_1d = signal_1d[start_idx:end_idx]
+
+        return signal_1d.unsqueeze(0)
+
     def classify(self, audio_path: str | Path) -> AccentResult:
         """Extracts SpeechBrain embeddings and classifies the English accent.
 
@@ -147,18 +177,31 @@ class AccentClassifier:
         if not path.exists():
             raise FileNotFoundError(f"Audio file does not exist: {path}")
 
-        # 1. Load audio signal
-        signal, _fs = self._load_audio(path)
-        if signal.shape[0] > 1:
-            signal = torch.mean(signal, dim=0, keepdim=True)
+        # 1. Load and preprocess audio signal
+        signal, fs = self._load_audio(path)
+        preprocessed_signal = self._preprocess_signal(signal)
+
+        # 2. Check minimum duration guard
+        duration_seconds = float(preprocessed_signal.shape[1] / fs) if fs > 0 else 0.0
+        if duration_seconds < self.min_duration_seconds:
+            return AccentResult(
+                predicted_accent="Uncertain — clip too short",
+                confidence=0.0,
+                top_3_accents=[],
+                notes=[
+                    f"Audio duration ({duration_seconds:.2f}s) is below the minimum "
+                    f"threshold ({self.min_duration_seconds:.1f}s) required for "
+                    "confident accent classification."
+                ],
+            )
 
         classifier = self._get_classifier()
 
-        # 2. Extract SpeechBrain speech embeddings
+        # 3. Extract SpeechBrain speech embeddings
         with torch.no_grad():
-            embeddings = classifier.encode_batch(signal)
+            embeddings = classifier.encode_batch(preprocessed_signal)
 
-        # Flatten embedding safely to a 1D numpy array using flatten()
+        # Flatten embedding safely to a 1D numpy array
         raw_emb = embeddings.squeeze().cpu().numpy()
         emb_np = np.array(raw_emb).flatten()
 
@@ -166,28 +209,30 @@ class AccentClassifier:
         norm = np.linalg.norm(emb_np)
         emb_unit = emb_np / norm if norm > 0 else emb_np
 
-        # 3. Classify using cosine similarities to accent centroids
+        # 4. Classify using cosine similarities to accent centroids
         centroids = self._get_centroids(len(emb_unit))
         similarities = {}
         for accent, centroid in centroids.items():
             sim = float(np.dot(emb_unit, centroid))
             similarities[accent] = sim
 
-        # 4. Softmax similarity scores to generate probabilities (confidence)
-        # Scale similarities slightly to increase classifier contrast
+        # 5. Softmax similarity scores to generate probabilities (confidence)
         scale = 15.0
         exp_scores = {acc: math.exp(sim * scale) for acc, sim in similarities.items()}
         total_exp = sum(exp_scores.values())
         probabilities = {acc: exp / total_exp for acc, exp in exp_scores.items()}
 
-        # 5. Sort choices descending
         sorted_accents = sorted(probabilities.items(), key=lambda x: x[1], reverse=True)
-
-        predicted_accent, confidence = sorted_accents[0]
+        top_accent_name, top_confidence = sorted_accents[0]
         top_3 = sorted_accents[:3]
 
-        # Explicitly enforce bounds: 0.0 to 1.0
-        confidence = max(0.0, min(1.0, confidence))
+        top_confidence = max(0.0, min(1.0, top_confidence))
+
+        # 6. Apply confidence threshold guard (e.g. 50%)
+        if top_confidence < self.confidence_threshold:
+            predicted_accent = "Uncertain — accent not clearly identifiable"
+        else:
+            predicted_accent = top_accent_name
 
         notes = [
             f"Accent embeddings processed via {classifier.__class__.__name__}.",
@@ -197,9 +242,15 @@ class AccentClassifier:
             "similarities and is not clinically or scientifically validated.",
         ]
 
+        if top_confidence < self.confidence_threshold:
+            notes.append(
+                f"Top accent match ({top_confidence * 100:.1f}%) was below the "
+                f"{self.confidence_threshold * 100:.0f}% certainty threshold."
+            )
+
         return AccentResult(
             predicted_accent=predicted_accent,
-            confidence=round(confidence, 4),
+            confidence=round(top_confidence, 4),
             top_3_accents=[
                 (acc, round(max(0.0, min(1.0, prob)), 4)) for acc, prob in top_3
             ],
