@@ -177,21 +177,28 @@ class AccentClassifier:
         if not path.exists():
             raise FileNotFoundError(f"Audio file does not exist: {path}")
 
-        # 1. Load and preprocess audio signal
+        # 1. Load and check raw audio signal duration
         signal, fs = self._load_audio(path)
-        preprocessed_signal = self._preprocess_signal(signal)
+        raw_duration = float(signal.shape[1] / fs) if fs > 0 else 0.0
 
-        # 2. Check minimum duration guard
-        duration_seconds = float(preprocessed_signal.shape[1] / fs) if fs > 0 else 0.0
-        if duration_seconds < self.min_duration_seconds:
+        # Preprocess signal (volume normalization and silence trimming)
+        preprocessed_signal = self._preprocess_signal(signal)
+        trimmed_duration = float(preprocessed_signal.shape[1] / fs) if fs > 0 else 0.0
+
+        # 2. Check minimum duration guard (against raw or trimmed duration)
+        if (
+            raw_duration < self.min_duration_seconds
+            or trimmed_duration < self.min_duration_seconds
+        ):
+            effective_duration = min(raw_duration, trimmed_duration)
             return AccentResult(
                 predicted_accent="Uncertain — clip too short",
                 confidence=0.0,
                 top_3_accents=[],
                 notes=[
-                    f"Audio duration ({duration_seconds:.2f}s) is below the minimum "
-                    f"threshold ({self.min_duration_seconds:.1f}s) required for "
-                    "confident accent classification."
+                    f"Audio duration ({effective_duration:.2f}s) is below the "
+                    f"minimum threshold ({self.min_duration_seconds:.1f}s) "
+                    "required for confident accent classification."
                 ],
             )
 

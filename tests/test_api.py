@@ -2,7 +2,7 @@
 
 import io
 import wave
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -58,6 +58,71 @@ def test_analyze_invalid_audio_conversion_failure():
     )
     assert response.status_code == 422
     assert "audio conversion failed" in response.json()["detail"].lower()
+
+
+def test_analyze_short_audio_clip_triggers_accent_too_short_guard():
+    """Integration test: audio under 5 seconds returns 'clip too short'."""
+    # 3.31 second audio clip
+    wav_bytes = create_dummy_wav_bytes(duration_sec=3.31)
+
+    mock_whisper = MagicMock()
+    mock_whisper.transcribe.return_value = "Hello world"
+
+    with patch("voicelens.pipeline.WhisperTranscriber", return_value=mock_whisper):
+        response = client.post(
+            "/api/analyze",
+            files={"file": ("recording_3_31s.wav", wav_bytes, "audio/wav")},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["accent"]["predictedAccent"] == "Uncertain — clip too short"
+        assert data["accent"]["confidence"] == 0.0
+        assert data["accent"]["top3Accents"] == []
+        assert "below the minimum threshold" in data["accent"]["notes"][0]
+
+
+def test_analyze_ambiguous_accent_triggers_accent_uncertain_guard():
+    """Integration test: low confidence accent match returns uncertain guard."""
+    # 6.0 second audio clip (clears duration guard)
+    wav_bytes = create_dummy_wav_bytes(duration_sec=6.0)
+
+    mock_tx = MagicMock()
+    mock_tx.transcribe.return_value = "Testing accent classification"
+
+    # Mock AccentClassifier.classify to return match with top match 35.4% (< 50%)
+    with (
+        patch("voicelens.pipeline.WhisperTranscriber", return_value=mock_tx),
+        patch(
+            "voicelens.pipeline.AccentClassifier.classify",
+            return_value=MagicMock(
+                predicted_accent="Uncertain — accent not clearly identifiable",
+                confidence=0.354,
+                top_3_accents=[
+                    ("Australian English", 0.354),
+                    ("British English", 0.255),
+                    ("Indian English", 0.176),
+                ],
+                notes=[
+                    "Top accent match (35.4%) was below the 50% certainty threshold."
+                ],
+            ),
+        ),
+    ):
+        response = client.post(
+            "/api/analyze",
+            files={"file": ("recording_6s.wav", wav_bytes, "audio/wav")},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert (
+            data["accent"]["predictedAccent"]
+            == "Uncertain — accent not clearly identifiable"
+        )
+        assert data["accent"]["confidence"] == 0.354
+        assert len(data["accent"]["top3Accents"]) == 3
+        assert data["accent"]["top3Accents"][0]["accent"] == "Australian English"
 
 
 def test_analyze_valid_audio():

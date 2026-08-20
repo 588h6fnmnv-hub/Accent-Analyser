@@ -36,8 +36,10 @@ def generate_clean_feedback(
     """Generates plain text overall feedback bullet points for analysis results."""
     feedback = []
 
-    if detected_accent:
+    if detected_accent and not detected_accent.startswith("Uncertain"):
         feedback.append(f"• Accent Profile: Detected accent is {detected_accent}.")
+    elif detected_accent:
+        feedback.append(f"• Accent Profile: {detected_accent}.")
     else:
         feedback.append(
             "• Accent Profile: Accent classification failed or was skipped."

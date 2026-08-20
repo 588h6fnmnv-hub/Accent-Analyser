@@ -31,6 +31,8 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
     overallFeedback,
   } = result;
 
+  const isUncertainAccent = accent.predictedAccent.startsWith('Uncertain');
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 space-y-8">
       {/* Top Header Bar */}
@@ -99,21 +101,25 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
             <span className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
               {accent.predictedAccent}
             </span>
-            <span className="ml-2 font-mono text-xs text-[var(--text-secondary)]">
-              ({formatConfidencePercent(accent.confidence)}%)
-            </span>
+            {accent.confidence > 0 && (
+              <span className="ml-2 font-mono text-xs text-[var(--text-secondary)]">
+                ({formatConfidencePercent(accent.confidence)}%)
+              </span>
+            )}
           </div>
 
-          <div className="space-y-2 border-t border-[var(--border-subtle)] pt-3 font-mono text-xs text-[var(--text-secondary)]">
-            {accent.top3Accents.map((item, idx) => (
-              <div key={idx} className="flex justify-between">
-                <span>{item.accent}</span>
-                <span className="text-[var(--text-primary)]">
-                  {formatConfidencePercent(item.confidence)}%
-                </span>
-              </div>
-            ))}
-          </div>
+          {!isUncertainAccent && accent.top3Accents.length > 0 && (
+            <div className="space-y-2 border-t border-[var(--border-subtle)] pt-3 font-mono text-xs text-[var(--text-secondary)]">
+              {accent.top3Accents.map((item, idx) => (
+                <div key={idx} className="flex justify-between">
+                  <span>{item.accent}</span>
+                  <span className="text-[var(--text-primary)]">
+                    {formatConfidencePercent(item.confidence)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Pronunciation & Similarity Card */}
